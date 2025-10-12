@@ -1,0 +1,6 @@
+# Python
+*.egg-info
+__pycache__
+
+# Virtual Environments
+venv/

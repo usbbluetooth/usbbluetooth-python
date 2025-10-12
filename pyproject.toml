@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "usbbluetooth"
+dynamic = ["version"]
+authors = [
+  { name="Antonio Vázquez Blanco", email="antoniovazquezblanco@gmail.com" },
+]
+description = "Take full control of your USB Bluetooth controllers!"
+readme = "README.md"
+license = { text="GPL-3.0-only" }
+requires-python = ">=3.0"
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Telecommunications Industry",
+    "Topic :: Security",
+]
+dependencies = [
+    "pyusb"
+]
+keywords = [ "bluetooth" ]
+
+[project.urls]
+"Homepage" = "https://usbbluetooth.github.io/"
+"Bug Tracker" = "https://github.com/usbbluetooth/usbbluetooth-python/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/usbbluetooth"]
+
+[tool.hatch.version]
+source = "vcs"
