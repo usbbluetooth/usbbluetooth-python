@@ -4,16 +4,19 @@
 [![PyPI](https://img.shields.io/pypi/v/usbbluetooth)](https://pypi.org/project/usbbluetooth/)
 [![Snyk](https://snyk.io/advisor/python/usbbluetooth/badge.svg)](https://snyk.io/advisor/python/usbbluetooth)
 
-Take full control of your USB Bluetooth controllers!
+Take full control of your USB Bluetooth controllers from Python!
 
-If you want to use this library with Scapy, please checkout [scapy-usbbluetooth](https://pypi.org/project/scapy-usbbluetooth/).
+If you want to use this library with Scapy, please check out [scapy-usbbluetooth](https://pypi.org/project/scapy-usbbluetooth/).
 
-In order to use the library in python just install the Python package.
-You may install the package from Pypi:
+## Installation
 
-```bash
+Just use pip :)
+
+```
 pip install usbbluetooth
 ```
+
+## Usage
 
 Once installed, you may list devices using `usbbluetooth.list_controllers()`, and for each device you may `open()` the device, `write()` and `read()` to them and `close()` it once you are done.
 See the [examples](examples/) folder for some sample code.
