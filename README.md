@@ -8,6 +8,12 @@ Take full control of your USB Bluetooth controllers from Python!
 
 If you want to use this library with Scapy, please check out [scapy-usbbluetooth](https://pypi.org/project/scapy-usbbluetooth/).
 
+For general documentation about the project, please visit [usbbluetooth.github.io](https://usbbluetooth.github.io).
+
+For a C version of this library, check out [UsbBluetooth for C](https://github.com/usbbluetooth/usbbluetooth).
+
+For a C# version of this library, check out [UsbBluetooth for C#](https://github.com/usbbluetooth/usbbluetooth-csharp).
+
 ## Installation
 
 Just use pip :)
