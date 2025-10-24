@@ -21,6 +21,14 @@ class Controller:
         self._ep_acl_out = None
         self.is_open = False
 
+    @property
+    def vendor_id(self):
+        return self._dev.idVendor
+
+    @property
+    def product_id(self):
+        return self._dev.idProduct
+
     def open(self):
         # Check if there is a kernel driver controlling the device
         try:
