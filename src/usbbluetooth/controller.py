@@ -57,7 +57,7 @@ class Controller:
         )
 
         # Claim the interface
-        usb.util.claim_interface(self._dev, self._interface_bt)
+        usb.util.claim_interface(self._dev, self._interface_bt.bInterfaceNumber)
 
         # Get the relevant endpoints
         self._ep_events = usb.util.find_descriptor(
