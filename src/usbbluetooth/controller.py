@@ -30,31 +30,32 @@ class Controller:
         return self._dev.idProduct
 
     def open(self):
-        # Check if there is a kernel driver controlling the device
+        # Try to get the active configuration...
+        config = None
         try:
-            if self._dev.is_kernel_driver_active(0):
-                # Detach the kernel driver
-                self._dev.detach_kernel_driver(0)
-        except NotImplementedError:
-            # In windows, is_kernel_driver_active and detach_kernel_driver are
-            # not implemented
-            pass
-
-        # Configure the device. If already configured, this acts as a reset
-        try:
-            self._dev.set_configuration()
+            config = self._dev.get_active_configuration()
         except NotImplementedError:
             # In windows, set_configuration is not implemented for devices not
             # running the correct driver, that should be WinUSB
             raise WrongDriverException()
 
-        # Find the Bluetooth interface...
+        # Find the Bluetooth interface of the usb device...
         self._interface_bt = usb.util.find_descriptor(
-            self._dev.get_active_configuration(),
+            config,
             bInterfaceClass=usb.CLASS_WIRELESS_CONTROLLER,
             bInterfaceSubClass=usb.SUBCLASS_RF_CONTROLLER,
             bInterfaceProtocol=usb.PROTOCOL_BLUETOOTH_PRIMARY_CONTROLLER,
         )
+
+        # Check if there is a kernel driver controlling the interface
+        try:
+            if self._dev.is_kernel_driver_active(self._interface_bt.bInterfaceNumber):
+                # Detach the kernel driver
+                self._dev.detach_kernel_driver(self._interface_bt.bInterfaceNumber)
+        except NotImplementedError:
+            # In windows, is_kernel_driver_active and detach_kernel_driver are
+            # not implemented
+            pass
 
         # Claim the interface
         usb.util.claim_interface(self._dev, self._interface_bt.bInterfaceNumber)
@@ -84,12 +85,12 @@ class Controller:
     def close(self):
         # Release the claimed interface
         if hasattr(self, "_interface_bt") and self._interface_bt is not None:
-            usb.util.release_interface(self._dev, self._interface_bt)
+            usb.util.release_interface(self._dev, self._interface_bt.bInterfaceNumber)
 
         # Reattach the kernel driver
         try:
-            if self._dev.is_kernel_driver_active(0) is False:
-                self._dev.attach_kernel_driver(0)
+            if self._dev.is_kernel_driver_active(self._interface_bt.bInterfaceNumber) is False:
+                self._dev.attach_kernel_driver(self._interface_bt.bInterfaceNumber)
         except NotImplementedError:
             # In windows, is_kernel_driver_active and detach_kernel_driver are
             # not implemented
