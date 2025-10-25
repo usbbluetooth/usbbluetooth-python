@@ -6,8 +6,9 @@
 
 import usb
 from .hci_hdr_type import HciHdrType
-from .wrong_driver_exception import WrongDriverException
-from .device_closed_exception import DeviceClosedException
+from .exception.wrong_driver_exception import WrongDriverException
+from .exception.device_closed_exception import DeviceClosedException
+from .exception.insufficient_permissions_exception import InsufficientPermissionsException
 
 
 class Controller:
@@ -38,6 +39,14 @@ class Controller:
             # In windows, set_configuration is not implemented for devices not
             # running the correct driver, that should be WinUSB
             raise WrongDriverException()
+        except usb.core.USBError as e:
+            if e.errno == 13:
+                # This happens in Linux when the user has insufficient permissions
+                # to access the USB device
+                raise InsufficientPermissionsException()
+            else:
+                # This may be anything, report it to the user...
+                raise e
 
         # Find the Bluetooth interface of the usb device...
         self._interface_bt = usb.util.find_descriptor(
@@ -51,14 +60,16 @@ class Controller:
         try:
             if self._dev.is_kernel_driver_active(self._interface_bt.bInterfaceNumber):
                 # Detach the kernel driver
-                self._dev.detach_kernel_driver(self._interface_bt.bInterfaceNumber)
+                self._dev.detach_kernel_driver(
+                    self._interface_bt.bInterfaceNumber)
         except NotImplementedError:
             # In windows, is_kernel_driver_active and detach_kernel_driver are
             # not implemented
             pass
 
         # Claim the interface
-        usb.util.claim_interface(self._dev, self._interface_bt.bInterfaceNumber)
+        usb.util.claim_interface(
+            self._dev, self._interface_bt.bInterfaceNumber)
 
         # Get the relevant endpoints
         self._ep_events = usb.util.find_descriptor(
