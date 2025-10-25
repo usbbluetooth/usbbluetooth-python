@@ -83,18 +83,21 @@ class Controller:
         self.is_open = True
 
     def close(self):
-        # Release the claimed interface
+        # Check if we have information about the Bluetooth interface
         if hasattr(self, "_interface_bt") and self._interface_bt is not None:
-            usb.util.release_interface(self._dev, self._interface_bt.bInterfaceNumber)
+            # Release the claimed interface
+            usb.util.release_interface(
+                self._dev, self._interface_bt.bInterfaceNumber)
 
-        # Reattach the kernel driver
-        try:
-            if self._dev.is_kernel_driver_active(self._interface_bt.bInterfaceNumber) is False:
-                self._dev.attach_kernel_driver(self._interface_bt.bInterfaceNumber)
-        except NotImplementedError:
-            # In windows, is_kernel_driver_active and detach_kernel_driver are
-            # not implemented
-            pass
+            # Reattach the kernel driver
+            try:
+                if self._dev.is_kernel_driver_active(self._interface_bt.bInterfaceNumber) is False:
+                    self._dev.attach_kernel_driver(
+                        self._interface_bt.bInterfaceNumber)
+            except NotImplementedError:
+                # In windows, is_kernel_driver_active and detach_kernel_driver are
+                # not implemented
+                pass
 
         self.is_open = False
 
