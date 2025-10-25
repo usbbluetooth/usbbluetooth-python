@@ -143,19 +143,19 @@ class Controller:
         else:
             raise ValueError(f"Unsupported HCI packet type: {type}")
 
-    def read(self, bufsize=1024):
+    def read(self, bufsize=1024, timeout=500):
         if not self.is_open:
             raise DeviceClosedException()
         # Data endpoint
         try:
-            data_acl = self._ep_acl_in.read(bufsize, timeout=1)
+            data_acl = self._ep_acl_in.read(bufsize, timeout=timeout)
             if data_acl and len(data_acl) > 0:
                 return b"\x02" + data_acl
         except usb.core.USBTimeoutError:
             pass
         # Event endpoint
         try:
-            data_evt = self._ep_events.read(bufsize, timeout=1)
+            data_evt = self._ep_events.read(bufsize, timeout=timeout)
             if data_evt and len(data_evt) > 0:
                 return b"\x04" + data_evt
         except usb.core.USBTimeoutError:
