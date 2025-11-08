@@ -127,7 +127,7 @@ class Controller:
             request_type = usb.util.build_request_type(
                 usb.util.CTRL_OUT,
                 usb.util.CTRL_TYPE_CLASS,
-                usb.util.CTRL_RECIPIENT_INTERFACE,
+                usb.util.CTRL_RECIPIENT_DEVICE,
             )
             sent_bytes = self._dev.ctrl_transfer(
                 bmRequestType=request_type,
