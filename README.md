@@ -3,6 +3,7 @@
 [![Build](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/build.yml/badge.svg)](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/build.yml)
 [![PyPI](https://img.shields.io/pypi/v/usbbluetooth)](https://pypi.org/project/usbbluetooth/)
 [![Snyk](https://snyk.io/advisor/python/usbbluetooth/badge.svg)](https://snyk.io/advisor/python/usbbluetooth)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
 Take full control of your USB Bluetooth controllers from Python!
 
