@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["pypy3.10", "pypy3.11", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["pypy3.11", "3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -34,7 +34,6 @@ jobs:
           name: usbbluetooth_python_${{ matrix.python-version }}
           path: dist/
 
-
   publish_pypi:
     name: Publish to PyPi
     needs: [build]
@@ -46,11 +45,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v8
-      with:
-        name: usbbluetooth_python_3.13
-        path: dist/
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: usbbluetooth_python_3.13
+          path: dist/
 
-    - name: Publish distribution to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
