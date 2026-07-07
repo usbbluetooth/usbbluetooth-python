@@ -3,6 +3,7 @@
 [![Build](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/build.yml/badge.svg)](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/build.yml)
 [![CodeQL](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/codeql.yml/badge.svg)](https://github.com/usbbluetooth/usbbluetooth-python/actions/workflows/codeql.yml)
 [![PyPI](https://img.shields.io/pypi/v/usbbluetooth)](https://pypi.org/project/usbbluetooth/)
+[![Python versions](https://img.shields.io/pypi/pyversions/usbbluetooth.svg)](https://pypi.org/project/usbbluetooth/)
 [![Snyk package health](https://img.shields.io/badge/Snyk-package%20health-4C4A73?logo=snyk&logoColor=white)](https://snyk.io/advisor/python/usbbluetooth)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/usbbluetooth/usbbluetooth-python/badge)](https://scorecard.dev/viewer/?uri=github.com/usbbluetooth/usbbluetooth-python)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
