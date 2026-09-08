@@ -20,6 +20,8 @@ class Controller:
         self._ep_events = None
         self._ep_acl_in = None
         self._ep_acl_out = None
+        self._hci_cmd_request_type = None
+        self._hci_cmd_index = None
         self.is_open = False
 
     @property
@@ -29,6 +31,45 @@ class Controller:
     @property
     def product_id(self):
         return self._dev.idProduct
+
+    @property
+    def is_single_function(self):
+        """True if the whole USB device is a Bluetooth Controller and not a composite device."""
+        return (self._dev.bDeviceClass == usb.CLASS_WIRELESS_CONTROLLER
+                and self._dev.bDeviceSubClass == usb.SUBCLASS_RF_CONTROLLER
+                and self._dev.bDeviceProtocol == usb.PROTOCOL_BLUETOOTH_PRIMARY_CONTROLLER)
+
+    @property
+    def is_composite(self):
+        """True if the USB device is a composite device with a Bluetooth Controller function."""
+        return not self.is_single_function
+
+    def _hci_command_addressing(self):
+        """Return the (bmRequestType, wIndex) to address HCI command packets.
+
+        Endpoint 0 carries HCI commands as class requests, and the Setup Data
+        can target either the device or an interface. A single function
+        Controller is addressed as the device, with wIndex 0. A Controller
+        inside a composite device is addressed as its interface, with wIndex
+        selecting which interface that is.
+
+        Composite devices are required to also accept device-addressed HCI
+        commands and route them to the Controller function, so the device form
+        is the safe one; the interface form is used only when the descriptors
+        say the Controller really is one function among several.
+        """
+        if self.is_single_function:
+            recipient = usb.util.CTRL_RECIPIENT_DEVICE
+            index = 0x00
+        else:
+            recipient = usb.util.CTRL_RECIPIENT_INTERFACE
+            index = self._interface_bt.bInterfaceNumber
+        request_type = usb.util.build_request_type(
+            usb.util.CTRL_OUT,
+            usb.util.CTRL_TYPE_CLASS,
+            recipient,
+        )
+        return request_type, index
 
     def open(self):
         # Try to get the active configuration...
@@ -91,6 +132,12 @@ class Controller:
             custom_match=lambda e: usb.util.endpoint_direction(
                 e.bEndpointAddress) == usb.util.ENDPOINT_OUT
         )
+
+        # Work out how HCI command packets have to be addressed on endpoint 0.
+        # This only depends on the descriptors, so resolve it once here.
+        self._hci_cmd_request_type, self._hci_cmd_index = \
+            self._hci_command_addressing()
+
         self.is_open = True
 
     def close(self):
@@ -124,16 +171,11 @@ class Controller:
             raise DeviceClosedException()
         type = HciHdrType(data[0])
         if type == HciHdrType.COMMAND:
-            request_type = usb.util.build_request_type(
-                usb.util.CTRL_OUT,
-                usb.util.CTRL_TYPE_CLASS,
-                usb.util.CTRL_RECIPIENT_DEVICE,
-            )
             sent_bytes = self._dev.ctrl_transfer(
-                bmRequestType=request_type,
+                bmRequestType=self._hci_cmd_request_type,
                 bRequest=0,
                 wValue=0,
-                wIndex=self._interface_bt.bInterfaceNumber,
+                wIndex=self._hci_cmd_index,
                 data_or_wLength=data[1:],
             )
             return sent_bytes + 1
