@@ -5,7 +5,7 @@ permissions:
 
 jobs:
   build:
-    name: Build package on ${{ matrix.python-version }}
+    name: Build and test on ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,11 +28,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip 
+          python -m pip install --upgrade pip
           pip install hatch
 
       - name: Build
         run: hatch build
+
+      - name: Test
+        run: |
+          pip install "$(ls dist/*.whl)[test]"
+          pytest -v
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
