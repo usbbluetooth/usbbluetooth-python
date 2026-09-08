@@ -185,25 +185,48 @@ class Controller:
         else:
             raise ValueError(f"Unsupported HCI packet type: {type}")
 
+    def _read_acl(self, bufsize, timeout):
+        """Read one HCI ACL data packet from the bulk IN endpoint.
+
+        :return: the packet prefixed with its HCI packet type byte, or None if
+            nothing arrived before the timeout.
+        """
+        try:
+            data = self._ep_acl_in.read(bufsize, timeout=timeout)
+        except usb.core.USBTimeoutError:
+            return None
+        if data is not None and len(data) > 0:
+            return b"\x02" + data
+        return None
+
+    def _read_event(self, bufsize, timeout):
+        """Read one HCI event packet from the interrupt IN endpoint.
+
+        :return: the packet prefixed with its HCI packet type byte, or None if
+            nothing arrived before the timeout.
+        """
+        try:
+            data = self._ep_events.read(bufsize, timeout=timeout)
+        except usb.core.USBTimeoutError:
+            return None
+        if data is not None and len(data) > 0:
+            return b"\x04" + data
+        return None
+
     def read(self, bufsize=1024, timeout=500):
+        """Read the next HCI packet from the controller, from either endpoint.
+
+        :return: the packet prefixed with its HCI packet type byte, or None if
+            neither endpoint produced one before the timeout.
+        """
         if not self.is_open:
             raise DeviceClosedException()
         # Data endpoint
-        try:
-            data_acl = self._ep_acl_in.read(bufsize, timeout=timeout)
-            if data_acl and len(data_acl) > 0:
-                return b"\x02" + data_acl
-        except usb.core.USBTimeoutError:
-            pass
-        # Event endpoint
-        try:
-            data_evt = self._ep_events.read(bufsize, timeout=timeout)
-            if data_evt and len(data_evt) > 0:
-                return b"\x04" + data_evt
-        except usb.core.USBTimeoutError:
-            pass
-        # Nothing to return
-        return None
+        packet = self._read_acl(bufsize, timeout)
+        if packet is None:
+            # Event endpoint
+            packet = self._read_event(bufsize, timeout)
+        return packet
 
     def __str__(self) -> str:
         return f"Controller{{vid={hex(self._dev.idVendor)}, pid={hex(self._dev.idProduct)}}}"
