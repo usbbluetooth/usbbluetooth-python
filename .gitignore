@@ -1,6 +1,7 @@
 # Python
 *.egg-info
 __pycache__
+dist/
 
 # Virtual Environments
 venv/
