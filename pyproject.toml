@@ -28,6 +28,11 @@ dependencies = [
 ]
 keywords = [ "bluetooth" ]
 
+[project.optional-dependencies]
+test = [
+    "pytest"
+]
+
 [project.urls]
 "Homepage" = "https://usbbluetooth.github.io/"
 "Bug Tracker" = "https://github.com/usbbluetooth/usbbluetooth-python/issues"
@@ -37,3 +42,12 @@ packages = ["src/usbbluetooth"]
 
 [tool.hatch.version]
 source = "vcs"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/ is not a package: this puts it on sys.path so conftest can import
+# the fake backend directly.
+pythonpath = ["tests"]
+markers = [
+    "hardware: needs a real USB Bluetooth controller (opt in with --hardware)",
+]
