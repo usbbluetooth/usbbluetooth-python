@@ -10,6 +10,7 @@ from .hci_hdr_type import HciHdrType
 from .exception.wrong_driver_exception import WrongDriverException
 from .exception.device_closed_exception import DeviceClosedException
 from .exception.insufficient_permissions_exception import InsufficientPermissionsException
+from .exception.unsupported_usb_device_exception import UnsupportedUsbDeviceException
 
 
 class Controller:
@@ -98,6 +99,47 @@ class Controller:
             bInterfaceSubClass=usb.SUBCLASS_RF_CONTROLLER,
             bInterfaceProtocol=usb.PROTOCOL_BLUETOOTH_PRIMARY_CONTROLLER,
         )
+        if self._interface_bt is None:
+            raise UnsupportedUsbDeviceException("Bluetooth interface")
+
+        # Get the relevant endpoints. Table 2.1 puts HCI events on an interrupt
+        # IN endpoint and ACL data on a bulk pair, so every lookup is qualified
+        # by direction: without that an interrupt OUT endpoint would be accepted
+        # as the event endpoint and every read of it would fail.
+        #
+        # This reads descriptors only, so it runs before the interface is
+        # claimed. A device missing any of the three is then rejected without
+        # the kernel driver having been touched.
+        ep_events = usb.util.find_descriptor(
+            self._interface_bt,
+            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
+            bmAttributes=usb.util.ENDPOINT_TYPE_INTR,
+            custom_match=lambda e: usb.util.endpoint_direction(
+                e.bEndpointAddress) == usb.util.ENDPOINT_IN
+        )
+        if ep_events is None:
+            raise UnsupportedUsbDeviceException(
+                "interrupt IN endpoint for HCI events")
+
+        ep_acl_in = usb.util.find_descriptor(
+            self._interface_bt,
+            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
+            bmAttributes=usb.util.ENDPOINT_TYPE_BULK,
+            custom_match=lambda e: usb.util.endpoint_direction(
+                e.bEndpointAddress) == usb.util.ENDPOINT_IN
+        )
+        if ep_acl_in is None:
+            raise UnsupportedUsbDeviceException("bulk IN endpoint for ACL data")
+
+        ep_acl_out = usb.util.find_descriptor(
+            self._interface_bt,
+            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
+            bmAttributes=usb.util.ENDPOINT_TYPE_BULK,
+            custom_match=lambda e: usb.util.endpoint_direction(
+                e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+        )
+        if ep_acl_out is None:
+            raise UnsupportedUsbDeviceException("bulk OUT endpoint for ACL data")
 
         # Check if there is a kernel driver controlling the interface
         try:
@@ -114,30 +156,9 @@ class Controller:
         usb.util.claim_interface(
             self._dev, self._interface_bt.bInterfaceNumber)
 
-        # Get the relevant endpoints.
-        ep_events = usb.util.find_descriptor(
-            self._interface_bt,
-            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
-            bmAttributes=usb.util.ENDPOINT_TYPE_INTR,
-        )
         self._event_reader = HciEndpointReader(ep_events, HciHdrType.EVENT)
-
-        ep_acl_in = usb.util.find_descriptor(
-            self._interface_bt,
-            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
-            bmAttributes=usb.util.ENDPOINT_TYPE_BULK,
-            custom_match=lambda e: usb.util.endpoint_direction(
-                e.bEndpointAddress) == usb.util.ENDPOINT_IN
-        )
         self._acl_reader = HciEndpointReader(ep_acl_in, HciHdrType.ACL_DATA)
-
-        self._ep_acl_out = usb.util.find_descriptor(
-            self._interface_bt,
-            bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
-            bmAttributes=usb.util.ENDPOINT_TYPE_BULK,
-            custom_match=lambda e: usb.util.endpoint_direction(
-                e.bEndpointAddress) == usb.util.ENDPOINT_OUT
-        )
+        self._ep_acl_out = ep_acl_out
 
         # Work out how HCI command packets have to be addressed on endpoint 0.
         # This only depends on the descriptors, so resolve it once here.
