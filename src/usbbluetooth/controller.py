@@ -5,6 +5,7 @@
 #
 
 import usb
+from .utils.hci_endpoint_reader import HciEndpointReader
 from .hci_hdr_type import HciHdrType
 from .exception.wrong_driver_exception import WrongDriverException
 from .exception.device_closed_exception import DeviceClosedException
@@ -17,9 +18,9 @@ class Controller:
     def __init__(self, usb_device):
         self._dev = usb_device
         self._interface_bt = None
-        self._ep_events = None
-        self._ep_acl_in = None
         self._ep_acl_out = None
+        self._event_reader = None
+        self._acl_reader = None
         self._hci_cmd_request_type = None
         self._hci_cmd_index = None
         self.is_open = False
@@ -45,7 +46,8 @@ class Controller:
         return not self.is_single_function
 
     def _hci_command_addressing(self):
-        """Return the (bmRequestType, wIndex) to address HCI command packets.
+        """
+        Return the (bmRequestType, wIndex) to address HCI command packets.
 
         Endpoint 0 carries HCI commands as class requests, and the Setup Data
         can target either the device or an interface. A single function
@@ -112,19 +114,23 @@ class Controller:
         usb.util.claim_interface(
             self._dev, self._interface_bt.bInterfaceNumber)
 
-        # Get the relevant endpoints
-        self._ep_events = usb.util.find_descriptor(
+        # Get the relevant endpoints.
+        ep_events = usb.util.find_descriptor(
             self._interface_bt,
             bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
             bmAttributes=usb.util.ENDPOINT_TYPE_INTR,
         )
-        self._ep_acl_in = usb.util.find_descriptor(
+        self._event_reader = HciEndpointReader(ep_events, HciHdrType.EVENT)
+
+        ep_acl_in = usb.util.find_descriptor(
             self._interface_bt,
             bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
             bmAttributes=usb.util.ENDPOINT_TYPE_BULK,
             custom_match=lambda e: usb.util.endpoint_direction(
                 e.bEndpointAddress) == usb.util.ENDPOINT_IN
         )
+        self._acl_reader = HciEndpointReader(ep_acl_in, HciHdrType.ACL_DATA)
+
         self._ep_acl_out = usb.util.find_descriptor(
             self._interface_bt,
             bDescriptorType=usb.util.DESC_TYPE_ENDPOINT,
@@ -185,47 +191,73 @@ class Controller:
         else:
             raise ValueError(f"Unsupported HCI packet type: {type}")
 
-    def _read_acl(self, bufsize, timeout):
-        """Read one HCI ACL data packet from the bulk IN endpoint.
-
-        :return: the packet prefixed with its HCI packet type byte, or None if
-            nothing arrived before the timeout.
+    @property
+    def event_parameter_total_length(self):
         """
-        try:
-            data = self._ep_acl_in.read(bufsize, timeout=timeout)
-        except usb.core.USBTimeoutError:
-            return None
-        if data is not None and len(data) > 0:
-            return b"\x02" + data
-        return None
+        Largest Parameter_Total_Length an event read from here may state.
 
-    def _read_event(self, bufsize, timeout):
-        """Read one HCI event packet from the interrupt IN endpoint.
+        Parameter_Total_Length (Core 5.4 Vol 4 Part E section 5.4.4) is the
+        event's own length field, and like every HCI length it counts the
+        parameters only. The two byte header is added on top when the transfer
+        is posted, so a caller stays in the units HCI quotes and never adds it.
 
-        :return: the packet prefixed with its HCI packet type byte, or None if
-            nothing arrived before the timeout.
+        Defaults to 0xFF, all an 8 bit field can describe. Lower it only if the
+        controller has said it will never send more; setting it below what the
+        controller does send brings back the truncation the length exists to
+        prevent. It cannot go below the endpoint's maximum packet size less that
+        header, since no smaller transfer can hold even one USB packet.
         """
-        try:
-            data = self._ep_events.read(bufsize, timeout=timeout)
-        except usb.core.USBTimeoutError:
-            return None
-        if data is not None and len(data) > 0:
-            return b"\x04" + data
-        return None
+        if not self.is_open:
+            raise DeviceClosedException()
+        return self._event_reader.payload_size
 
-    def read(self, bufsize=1024, timeout=500):
+    @event_parameter_total_length.setter
+    def event_parameter_total_length(self, length):
+        if not self.is_open:
+            raise DeviceClosedException()
+        self._event_reader.payload_size = length
+
+    @property
+    def acl_data_total_length(self):
+        """
+        Largest Data_Total_Length an ACL packet read from here may state.
+
+        As event_parameter_total_length, for HCI ACL data: Data_Total_Length
+        (Core 5.4 Vol 4 Part E section 5.4.2), with a four byte header in front
+        of it.
+
+        The usual reason to lower this is ACL_Data_Packet_Length from
+        HCI_Read_Buffer_Size, which is typically far below what the 16 bit field
+        allows and is quoted in exactly these units, so it can be assigned
+        straight across. Reading it is HCI knowledge, so it has to be pushed
+        down from a layer that decodes commands rather than discovered here.
+        """
+        if not self.is_open:
+            raise DeviceClosedException()
+        return self._acl_reader.payload_size
+
+    @acl_data_total_length.setter
+    def acl_data_total_length(self, length):
+        if not self.is_open:
+            raise DeviceClosedException()
+        self._acl_reader.payload_size = length
+
+    def read(self, bufsize=None, timeout=500):
         """Read the next HCI packet from the controller, from either endpoint.
 
+        :param bufsize: deprecated and ignored. Each endpoint is now read with
+            its own length; see event_parameter_total_length and
+            acl_data_total_length.
         :return: the packet prefixed with its HCI packet type byte, or None if
             neither endpoint produced one before the timeout.
         """
         if not self.is_open:
             raise DeviceClosedException()
         # Data endpoint
-        packet = self._read_acl(bufsize, timeout)
+        packet = self._acl_reader.read(timeout)
         if packet is None:
             # Event endpoint
-            packet = self._read_event(bufsize, timeout)
+            packet = self._event_reader.read(timeout)
         return packet
 
     def __str__(self) -> str:

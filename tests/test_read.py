@@ -60,25 +60,6 @@ def test_reading_a_closed_controller_is_an_error(fake_controller):
         controller.read(timeout=10)
 
 
-def test_the_private_readers_each_use_their_own_endpoint(opened):
-    controller, backend = opened
-    backend.events.append(AN_EVENT)
-    backend.acl.append(SOME_ACL)
-
-    assert controller._read_event(257, 10) == bytes([EVENT]) + AN_EVENT
-    assert [c[0] for c in backend.log if c[0].endswith("_read")] == ["intr_read"]
-
-    backend.log.clear()
-    assert controller._read_acl(65539, 10) == bytes([ACL_DATA]) + SOME_ACL
-    assert [c[0] for c in backend.log if c[0].endswith("_read")] == ["bulk_read"]
-
-
-def test_a_reader_returns_nothing_when_its_endpoint_is_quiet(opened):
-    controller, _ = opened
-    assert controller._read_event(257, 10) is None
-    assert controller._read_acl(65539, 10) is None
-
-
 # --------------------------------------------------------------------------
 # How read() combines the two. Pinned here as it stands today; A2b changes it.
 # --------------------------------------------------------------------------
@@ -96,9 +77,22 @@ def test_read_polls_acl_before_events(opened):
     assert controller.read(timeout=10) == bytes([ACL_DATA]) + SOME_ACL
 
 
-def test_read_passes_the_same_bufsize_to_both_endpoints(opened):
-    """Also pinned: A2c gives each endpoint its own maximum instead."""
+def test_each_endpoint_is_read_with_its_own_maximum(opened):
+    """Replaces the pinned single-bufsize behaviour, per A2c.
+
+    The sizes come from the HCI packet headers: an 8 bit length for events, a
+    16 bit length for ACL data.
+    """
     controller, backend = opened
-    controller.read(bufsize=777, timeout=10)
+    controller.read(timeout=10)
     sizes = {call[0]: call[2] for call in backend.log if call[0].endswith("_read")}
-    assert sizes == {"bulk_read": 777, "intr_read": 777}
+    assert sizes == {"intr_read": 2 + 0xFF, "bulk_read": 4 + 0xFFFF}
+
+
+def test_the_bufsize_argument_is_ignored(opened):
+    """Kept for compatibility but deprecated: scapy passes MTU, which would
+    over size every event read if it were honoured."""
+    controller, backend = opened
+    controller.read(bufsize=65535, timeout=10)
+    sizes = {call[0]: call[2] for call in backend.log if call[0].endswith("_read")}
+    assert sizes == {"intr_read": 2 + 0xFF, "bulk_read": 4 + 0xFFFF}
