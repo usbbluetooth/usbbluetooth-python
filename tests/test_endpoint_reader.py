@@ -25,7 +25,7 @@ def reader(fake_controller):
     """A reader over the fake controller's interrupt IN endpoint."""
     controller, backend = fake_controller()
     controller.open()
-    return EndpointReader(controller._ep_events, 999), backend
+    return EndpointReader(controller._event_reader.endpoint, 999), backend
 
 
 def test_it_reads_the_bytes_unchanged(reader):
