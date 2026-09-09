@@ -3,5 +3,12 @@
 __pycache__
 dist/
 
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
 # Virtual Environments
 venv/
