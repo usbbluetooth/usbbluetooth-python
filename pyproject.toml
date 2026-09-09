@@ -30,7 +30,8 @@ keywords = [ "bluetooth" ]
 
 [project.optional-dependencies]
 test = [
-    "pytest>=7.0"
+    "pytest>=7.0",
+    "pytest-cov>=5.0"
 ]
 
 [project.urls]
@@ -43,10 +44,19 @@ packages = ["src/usbbluetooth"]
 [tool.hatch.version]
 source = "vcs"
 
+[tool.coverage.run]
+source_pkgs = ["usbbluetooth"]
+branch = true
+
+[tool.coverage.paths]
+source = ["src/usbbluetooth", "*/site-packages/usbbluetooth"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 79
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# tests/ is not a package: this puts it on sys.path so conftest can import
-# the fake backend directly.
 pythonpath = ["tests"]
 markers = [
     "hardware: needs a real USB Bluetooth controller (opt in with --hardware)",
