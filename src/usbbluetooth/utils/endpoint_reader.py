@@ -4,7 +4,11 @@
 # SPDX-FileCopyrightText: 2025 Antonio Vazquez Blanco <antoniovazquezblanco@gmail.com>
 #
 
+import errno
+
 import usb.core
+
+from ..exception.endpoint_stalled_exception import EndpointStalledException
 
 
 class EndpointReader:
@@ -82,16 +86,44 @@ class EndpointReader:
                 f"that big can arrive on it")
         self._read_size = size
 
+    def clear_halt(self):
+        """
+        Clear a halt condition on this endpoint, best effort.
+
+        A halted endpoint fails every transfer that follows, so clearing it is
+        what stands between one bad transfer and a controller that has to be
+        physically reconnected. If the clear itself fails the device is most
+        likely gone, and the caller is told about the stall regardless.
+        """
+        try:
+            self._endpoint.clear_halt()
+        except (usb.core.USBError, NotImplementedError):
+            # NotImplementedError: a backend that does not offer clear_halt at
+            # all. Nothing to recover with, but the stall is still reported.
+            pass
+
     def read(self, timeout):
         """
         Read one message.
 
         :return: the bytes read, or None if nothing arrived before the timeout.
+        :raises EndpointStalledException: if the endpoint halted. The halt is
+            cleared first; the message that was in flight is lost either way,
+            which is why this is raised rather than retried -- a retry would
+            hand back the *next* message as if it were this one.
         """
         try:
             data = self._endpoint.read(self._read_size, timeout=timeout)
         except usb.core.USBTimeoutError:
+            # A timeout is not an error here: it only means nothing arrived.
+            # Caught before USBError, of which it is a subclass.
             return None
+        except usb.core.USBError as e:
+            if e.errno != errno.EPIPE:
+                raise
+            self.clear_halt()
+            raise EndpointStalledException(
+                self._endpoint.bEndpointAddress) from e
         if data is None or len(data) == 0:
             return None
         return bytes(data)

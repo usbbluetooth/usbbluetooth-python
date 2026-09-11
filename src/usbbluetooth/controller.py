@@ -4,9 +4,12 @@
 # SPDX-FileCopyrightText: 2025 Antonio Vázquez Blanco <antoniovazquezblanco@gmail.com>
 #
 
+import errno
+
 import usb
 from .utils.hci_endpoint_reader import HciEndpointReader
 from .hci_hdr_type import HciHdrType
+from .exception.endpoint_stalled_exception import EndpointStalledException
 from .exception.wrong_driver_exception import WrongDriverException
 from .exception.device_closed_exception import DeviceClosedException
 from .exception.insufficient_permissions_exception import InsufficientPermissionsException
@@ -193,22 +196,60 @@ class Controller:
     def __exit__(self, type, value, tb):
         self.close()
 
+    def _clear_halt(self, endpoint_address):
+        """
+        Clear a halt condition on one of this device's endpoints, best effort.
+
+        A halted endpoint fails every transfer that follows, and a halted
+        control pipe has been observed taking a controller off the USB bus
+        entirely. If the clear itself fails the device is most likely gone, and
+        the caller is told about the stall regardless.
+        """
+        try:
+            self._dev.clear_halt(endpoint_address)
+        except (usb.core.USBError, NotImplementedError):
+            # NotImplementedError: a backend that does not offer clear_halt at
+            # all. Nothing to recover with, but the stall is still reported.
+            pass
+
     def write(self, data: bytearray) -> int:
+        """
+        Write one HCI packet, prefixed with its HCI packet type byte.
+
+        :return: the number of bytes written, the type byte included.
+        :raises EndpointStalledException: if the endpoint halted. The halt is
+            cleared first, and the packet is known not to have been delivered.
+        """
         if not self.is_open:
             raise DeviceClosedException()
         type = HciHdrType(data[0])
         if type == HciHdrType.COMMAND:
-            sent_bytes = self._dev.ctrl_transfer(
-                bmRequestType=self._hci_cmd_request_type,
-                bRequest=0,
-                wValue=0,
-                wIndex=self._hci_cmd_index,
-                data_or_wLength=data[1:],
-            )
-            return sent_bytes + 1
+            # Commands are class requests on endpoint 0, so a stall halts the
+            # control pipe rather than one of the data endpoints.
+            try:
+                sent_bytes = self._dev.ctrl_transfer(
+                    bmRequestType=self._hci_cmd_request_type,
+                    bRequest=0,
+                    wValue=0,
+                    wIndex=self._hci_cmd_index,
+                    data_or_wLength=data[1:],
+                )
+                return sent_bytes + 1
+            except usb.core.USBError as e:
+                if e.errno != errno.EPIPE:
+                    raise
+                self._clear_halt(0x00)
+                raise EndpointStalledException(0x00) from e
         elif type == HciHdrType.ACL_DATA:
-            sent_bytes = self._ep_acl_out.write(data[1:])
-            return sent_bytes + 1
+            try:
+                sent_bytes = self._ep_acl_out.write(data[1:])
+                return sent_bytes + 1
+            except usb.core.USBError as e:
+                if e.errno != errno.EPIPE:
+                    raise
+                address = self._ep_acl_out.bEndpointAddress
+                self._clear_halt(address)
+                raise EndpointStalledException(address) from e
         else:
             raise ValueError(f"Unsupported HCI packet type: {type}")
 

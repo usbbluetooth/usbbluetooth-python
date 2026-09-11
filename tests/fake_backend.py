@@ -130,6 +130,10 @@ class FakeBackend(usb.backend.IBackend):
         self.events = []
         #: bytes handed back by successive bulk reads
         self.acl = []
+        #: endpoint addresses currently halted. A halted endpoint fails every
+        #: transfer with a pipe error until clear_halt is called for it, which
+        #: is what makes recovery observable. Endpoint 0 is the control pipe.
+        self.halted = set()
 
     # -- helpers ----------------------------------------------------------
 
@@ -145,6 +149,16 @@ class FakeBackend(usb.backend.IBackend):
     def _timeout():
         # errno 110 ETIMEDOUT, as the libusb backend reports it
         return usb.core.USBTimeoutError("timed out", 110, 60)
+
+    @staticmethod
+    def _pipe_error():
+        # errno 32 EPIPE, which is how pyusb surfaces LIBUSB_ERROR_PIPE, i.e.
+        # a stalled endpoint. Third positional argument is the errno.
+        return usb.core.USBError("Pipe error", 9, 32)
+
+    def _fail_if_halted(self, ep):
+        if ep in self.halted:
+            raise self._pipe_error()
 
     def _fill(self, buff, data):
         length = min(len(data), len(buff))
@@ -215,6 +229,7 @@ class FakeBackend(usb.backend.IBackend):
 
     def clear_halt(self, handle, ep):
         self.log.append(("clear_halt", ep))
+        self.halted.discard(ep)
 
     # -- transfers --------------------------------------------------------
 
@@ -223,10 +238,12 @@ class FakeBackend(usb.backend.IBackend):
         payload = bytes(data)
         self.log.append(("ctrl_transfer", bmRequestType, bRequest, wValue,
                          wIndex, payload))
+        self._fail_if_halted(0x00)
         return len(payload)
 
     def intr_read(self, handle, ep, intf, buff, timeout):
         self.log.append(("intr_read", ep, len(buff)))
+        self._fail_if_halted(ep)
         if not self.events:
             raise self._timeout()
         return self._fill(buff, self.events.pop(0))
@@ -237,10 +254,12 @@ class FakeBackend(usb.backend.IBackend):
 
     def bulk_read(self, handle, ep, intf, buff, timeout):
         self.log.append(("bulk_read", ep, len(buff)))
+        self._fail_if_halted(ep)
         if not self.acl:
             raise self._timeout()
         return self._fill(buff, self.acl.pop(0))
 
     def bulk_write(self, handle, ep, intf, data, timeout):
         self.log.append(("bulk_write", ep, bytes(data)))
+        self._fail_if_halted(ep)
         return len(data)
