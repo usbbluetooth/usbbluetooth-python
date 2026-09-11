@@ -22,7 +22,7 @@ import usb.core
 
 from fake_backend import FakeBackend, controller_descriptors
 
-from usbbluetooth import (Controller, InsufficientPermissionsException,
+from usbbluetooth import (UsbController, InsufficientPermissionsException,
                           WrongDriverException)
 
 
@@ -87,7 +87,7 @@ def fake_controller():
         backend = FakeBackend(controller_descriptors(**kwargs))
         device = usb.core.find(backend=backend)
         assert device is not None, "the fake backend served no device"
-        controller = Controller(device)
+        controller = UsbController(device)
         opened.append(controller)
         return controller, backend
 

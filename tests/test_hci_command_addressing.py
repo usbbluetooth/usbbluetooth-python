@@ -31,7 +31,7 @@ import pytest
 from fake_backend import (BLUETOOTH_CLASS, COMPOSITE_IAD_CLASS,
                           PER_INTERFACE_CLASS)
 
-from usbbluetooth import Controller
+from usbbluetooth import UsbController
 
 # Section 2.2.1 and 2.2.2.
 REQUEST_TYPE_DEVICE = 0x20
@@ -46,7 +46,7 @@ HCI_RESET = b"\x01\x03\x0c\x00"
 
 def _controller_with_device_class(classes):
     """A Controller wrapping nothing but a Device Descriptor."""
-    return Controller(SimpleNamespace(bDeviceClass=classes[0],
+    return UsbController(SimpleNamespace(bDeviceClass=classes[0],
                                       bDeviceSubClass=classes[1],
                                       bDeviceProtocol=classes[2]))
 

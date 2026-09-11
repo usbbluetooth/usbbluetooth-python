@@ -5,10 +5,11 @@
 #
 
 import usb
+from .usb_controller import UsbController
 from .controller import Controller
 
 
-def _usb_bt_controller_filter(dev):
+def _usb_bt_controller_filter(dev) -> bool:
     '''Custom filter function to identify USB Bluetooth controllers.'''
     # Devices that directly expose Bluetooth capabilities in the device
     # descriptor
@@ -31,8 +32,8 @@ def _usb_bt_controller_filter(dev):
     return False
 
 
-def list_controllers():
+def list_controllers() -> list[Controller]:
     """List all connected controllers (USB Bluetooth devices)."""
     devs = usb.core.find(find_all=True, custom_match=_usb_bt_controller_filter)
-    return [Controller(d) for d in devs]
+    return [UsbController(d) for d in devs]
 

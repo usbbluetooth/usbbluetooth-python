@@ -22,7 +22,7 @@ import usb.util
 
 from fake_backend import BULK, INTR, FakeBackend, controller_descriptors
 
-from usbbluetooth import Controller, UnsupportedUsbDeviceException
+from usbbluetooth import UsbController, UnsupportedUsbDeviceException
 
 EVENT_IN = (0x81, INTR, 16)
 EVENT_OUT = (0x01, INTR, 16)
@@ -98,7 +98,7 @@ def test_a_device_with_no_bluetooth_interface_is_refused():
     descriptor, _ = interfaces[(0, 0)]
     descriptor.bInterfaceClass = 0xFF       # no longer wireless controller
     backend = FakeBackend((device, config, interfaces))
-    controller = Controller(usb.core.find(backend=backend))
+    controller = UsbController(usb.core.find(backend=backend))
     with pytest.raises(UnsupportedUsbDeviceException, match="Bluetooth interface"):
         controller.open()
 
