@@ -5,10 +5,12 @@
 #
 
 import errno
+import queue
 
 import usb
 from .controller import Controller
 from .utils.hci_endpoint_reader import HciEndpointReader
+from .utils.threaded_endpoint_reader import ThreadedEndpointReader
 from .hci_hdr_type import HciHdrType
 from .exception.endpoint_stalled_exception import EndpointStalledException
 from .exception.wrong_driver_exception import WrongDriverException
@@ -22,6 +24,17 @@ class UsbController(Controller):
     A Bluetooth HCI controller reached over USB (Core 5.4 Vol 4 Part B).
     """
 
+    #: Packets held before a slow consumer starts losing the oldest ones. Large
+    #: enough that ordinary request/response never fills it; a bound only matters
+    #: for a flood of unsolicited events nobody is reading.
+    _QUEUE_MAXSIZE = 1024
+    #: How long each reader blocks on its endpoint before looping to check the
+    #: stop flag. A packet returns as soon as it arrives, so this bounds only how
+    #: quickly close() is noticed by an idle reader, not read() latency.
+    _READER_POLL_MS = 200
+    #: Seconds close() waits for a reader thread to finish its current transfer.
+    _READER_JOIN_TIMEOUT = 2.0
+
     def __init__(self, usb_device):
         self._dev = usb_device
         self._interface_bt = None
@@ -31,6 +44,10 @@ class UsbController(Controller):
         self._hci_cmd_request_type = None
         self._hci_cmd_index = None
         self.is_open = False
+        # Receive path, set up by open() and torn down by close(). The queue is
+        # shared by the per-endpoint readers; read() drains it.
+        self._rx_queue = None
+        self._readers = []
 
     @property
     def vendor_id(self):
@@ -171,9 +188,21 @@ class UsbController(Controller):
         self._hci_cmd_request_type, self._hci_cmd_index = \
             self._hci_command_addressing()
 
+        # Fresh receive state for this session. The readers are not started
+        # here: they start on the first read() (see _start_readers).
+        self._rx_queue = queue.Queue(maxsize=self._QUEUE_MAXSIZE)
+        self._readers = []
+
         self.is_open = True
 
     def close(self):
+        # Stop the readers before releasing the interface they read from: a
+        # transfer in flight against a released interface would error. Each wakes
+        # every _READER_POLL_MS to see the stop flag, so the join is brief.
+        for reader in self._readers:
+            reader.stop(self._READER_JOIN_TIMEOUT)
+        self._readers = []
+
         # Check if we have information about the Bluetooth interface
         if hasattr(self, "_interface_bt") and self._interface_bt is not None:
             # Release the claimed interface
@@ -300,23 +329,62 @@ class UsbController(Controller):
             raise DeviceClosedException()
         self._acl_reader.payload_size = length
 
+    @property
+    def dropped_packets(self):
+        """
+        Packets discarded because the receive queue was full.
+
+        A non-zero count means packets arrived faster than read() consumed them
+        for long enough to fill the queue, and the oldest were dropped to keep
+        the newest. Steady in ordinary request/response use; watch it under a
+        flood of unsolicited events with no reader.
+        """
+        return sum(reader.dropped for reader in self._readers)
+
+    def _start_readers(self):
+        """Start one ThreadedEndpointReader per IN endpoint, once. Both feed the
+        one shared queue, so read() returns from whichever delivers first."""
+        if self._readers:
+            return
+        self._readers = [
+            ThreadedEndpointReader(reader, self._rx_queue,
+                                   poll_ms=self._READER_POLL_MS, name=name)
+            for reader, name in (
+                (self._event_reader, "usbbt-event-reader"),
+                (self._acl_reader, "usbbt-acl-reader"),
+            )
+        ]
+        for reader in self._readers:
+            reader.start()
+
     def read(self, bufsize=None, timeout=500):
         """Read the next HCI packet from the controller, from either endpoint.
 
-        :param bufsize: deprecated and ignored. Each endpoint is now read with
-            its own length; see event_parameter_total_length and
-            acl_data_total_length.
+        The two IN endpoints are drained concurrently by per-endpoint reader
+        threads (started on the first call), so this returns whichever produced
+        a packet first without waiting out one endpoint before trying the other.
+
+        :param bufsize: deprecated and ignored. Each endpoint is read with its
+            own length; see event_parameter_total_length and acl_data_total_length.
+        :param timeout: milliseconds to wait for a packet.
         :return: the packet prefixed with its HCI packet type byte, or None if
             neither endpoint produced one before the timeout.
+        :raises EndpointStalledException: surfaced from a reader whose endpoint
+            halted; the halt was cleared and the in-flight packet lost.
         """
         if not self.is_open:
             raise DeviceClosedException()
-        # Data endpoint
-        packet = self._acl_reader.read(timeout)
-        if packet is None:
-            # Event endpoint
-            packet = self._event_reader.read(timeout)
-        return packet
+        self._start_readers()
+        # A reader that fails puts its exception on the shared queue as an item,
+        # so it surfaces here in order behind whatever was already queued; there
+        # is no separate error channel to fall out of sync with.
+        try:
+            item = self._rx_queue.get(timeout=timeout / 1000.0)
+        except queue.Empty:
+            return None
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
     def __str__(self) -> str:
         return f"UsbController{{vid={hex(self._dev.idVendor)}, pid={hex(self._dev.idProduct)}}}"

@@ -9,6 +9,10 @@
 A controller delivers HCI events on an interrupt IN endpoint and ACL data on a
 bulk IN endpoint (Core 5.4 Vol 4 Part B, Table 2.1), and the packet is handed
 back prefixed with the HCI packet type byte that says which it was.
+
+Since A6 the two IN endpoints are drained concurrently by reader threads feeding
+one queue, so read() returns whichever produced a packet first rather than
+polling one endpoint and then the other.
 """
 
 import pytest
@@ -22,6 +26,11 @@ EVENT = 0x04
 # A Command Complete for HCI_Reset, and a two byte ACL fragment.
 AN_EVENT = b"\x0e\x04\x01\x03\x0c\x00"
 SOME_ACL = b"\x01\x00\x02\x00\xaa\xbb"
+
+# Comfortable upper bound for a read that is expected to succeed: a queued packet
+# is returned the moment a reader thread delivers it, so a read only approaches
+# this bound when nothing ever arrives.
+WAIT_MS = 2000
 
 
 @pytest.fixture
@@ -37,16 +46,14 @@ def opened(fake_controller):
 
 def test_an_event_comes_back_from_the_interrupt_endpoint(opened):
     controller, backend = opened
-    backend.events.append(AN_EVENT)
-    assert controller.read(timeout=10) == bytes([EVENT]) + AN_EVENT
-    assert [c[0] for c in backend.log if c[0].endswith("_read")] == [
-        "bulk_read", "intr_read"]
+    backend.push_event(AN_EVENT)
+    assert controller.read(timeout=WAIT_MS) == bytes([EVENT]) + AN_EVENT
 
 
 def test_acl_data_comes_back_from_the_bulk_endpoint(opened):
     controller, backend = opened
-    backend.acl.append(SOME_ACL)
-    assert controller.read(timeout=10) == bytes([ACL_DATA]) + SOME_ACL
+    backend.push_acl(SOME_ACL)
+    assert controller.read(timeout=WAIT_MS) == bytes([ACL_DATA]) + SOME_ACL
 
 
 def test_nothing_pending_reads_nothing(opened):
@@ -61,38 +68,37 @@ def test_reading_a_closed_controller_is_an_error(fake_controller):
 
 
 # --------------------------------------------------------------------------
-# How read() combines the two. Pinned here as it stands today; A2b changes it.
+# How read() combines the two endpoints
 # --------------------------------------------------------------------------
 
-def test_read_polls_acl_before_events(opened):
-    """Current order, pinned so that changing it is a deliberate act.
+def test_read_returns_packets_from_both_endpoints(opened):
+    """Both endpoints are drained concurrently, so both packets come back.
 
-    A2b will invert this -- section 2.4 gives events a latency requirement
-    while bulk ACL is best effort -- and this test is expected to change with
-    it.
+    The order between them is no longer guaranteed: read() used to poll ACL and
+    then events (pinned by the old test_read_polls_acl_before_events), and A6
+    removed that serialisation in favour of a reader thread per endpoint.
     """
     controller, backend = opened
-    backend.events.append(AN_EVENT)
-    backend.acl.append(SOME_ACL)
-    assert controller.read(timeout=10) == bytes([ACL_DATA]) + SOME_ACL
+    backend.push_event(AN_EVENT)
+    backend.push_acl(SOME_ACL)
+    got = {controller.read(timeout=WAIT_MS), controller.read(timeout=WAIT_MS)}
+    assert got == {bytes([EVENT]) + AN_EVENT, bytes([ACL_DATA]) + SOME_ACL}
 
 
 def test_each_endpoint_is_read_with_its_own_maximum(opened):
-    """Replaces the pinned single-bufsize behaviour, per A2c.
-
-    The sizes come from the HCI packet headers: an 8 bit length for events, a
-    16 bit length for ACL data.
-    """
-    controller, backend = opened
-    controller.read(timeout=10)
-    sizes = {call[0]: call[2] for call in backend.log if call[0].endswith("_read")}
-    assert sizes == {"intr_read": 2 + 0xFF, "bulk_read": 4 + 0xFFFF}
+    """Per A2c, each endpoint posts its own transfer size, taken from that HCI
+    packet header: an 8 bit length for events, a 16 bit length for ACL data."""
+    controller, _ = opened
+    assert controller._event_reader.read_size == 2 + 0xFF
+    assert controller._acl_reader.read_size == 4 + 0xFFFF
 
 
 def test_the_bufsize_argument_is_ignored(opened):
-    """Kept for compatibility but deprecated: scapy passes MTU, which would
-    over size every event read if it were honoured."""
+    """Kept for compatibility but deprecated: scapy passes MTU, which would over
+    size every event read if it were honoured, so it must not change read_size."""
     controller, backend = opened
-    controller.read(bufsize=65535, timeout=10)
-    sizes = {call[0]: call[2] for call in backend.log if call[0].endswith("_read")}
-    assert sizes == {"intr_read": 2 + 0xFF, "bulk_read": 4 + 0xFFFF}
+    backend.push_event(AN_EVENT)
+    assert controller.read(bufsize=65535, timeout=WAIT_MS) == \
+        bytes([EVENT]) + AN_EVENT
+    assert controller._event_reader.read_size == 2 + 0xFF
+    assert controller._acl_reader.read_size == 4 + 0xFFFF

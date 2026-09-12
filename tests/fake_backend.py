@@ -19,6 +19,8 @@ alternate settings for SCO.
 """
 
 import array
+import threading
+import time
 
 import usb.backend
 import usb.core
@@ -134,6 +136,11 @@ class FakeBackend(usb.backend.IBackend):
         #: transfer with a pipe error until clear_halt is called for it, which
         #: is what makes recovery observable. Endpoint 0 is the control pipe.
         self.halted = set()
+        #: Guards every field a reader thread touches (log, events, acl, halted)
+        #: and lets a blocking read wait for data instead of spinning. The
+        #: Controller drains each IN endpoint from its own thread, so the fake
+        #: has to be safe under concurrent reads; see item A6.
+        self._cond = threading.Condition()
 
     # -- helpers ----------------------------------------------------------
 
@@ -142,8 +149,34 @@ class FakeBackend(usb.backend.IBackend):
         return sorted({n for (n, _) in self.interfaces})
 
     def calls(self, kind):
-        """Every logged call of the given kind."""
-        return [entry for entry in self.log if entry[0] == kind]
+        """Every logged call of the given kind (a thread-safe snapshot)."""
+        with self._cond:
+            return [entry for entry in self.log if entry[0] == kind]
+
+    def log_snapshot(self):
+        """A thread-safe copy of the whole call log."""
+        with self._cond:
+            return list(self.log)
+
+    # -- injecting data / halts (wakes any waiting reader thread) ---------
+
+    def push_event(self, data):
+        """Queue an event for the interrupt IN endpoint and wake a waiter."""
+        with self._cond:
+            self.events.append(data)
+            self._cond.notify_all()
+
+    def push_acl(self, data):
+        """Queue ACL data for the bulk IN endpoint and wake a waiter."""
+        with self._cond:
+            self.acl.append(data)
+            self._cond.notify_all()
+
+    def halt(self, ep):
+        """Halt an endpoint and wake a waiter so it sees the stall at once."""
+        with self._cond:
+            self.halted.add(ep)
+            self._cond.notify_all()
 
     @staticmethod
     def _timeout():
@@ -228,38 +261,54 @@ class FakeBackend(usb.backend.IBackend):
         self.log.append(("attach_kernel_driver", intf))
 
     def clear_halt(self, handle, ep):
-        self.log.append(("clear_halt", ep))
-        self.halted.discard(ep)
+        with self._cond:
+            self.log.append(("clear_halt", ep))
+            self.halted.discard(ep)
+            self._cond.notify_all()
 
     # -- transfers --------------------------------------------------------
 
     def ctrl_transfer(self, handle, bmRequestType, bRequest, wValue, wIndex,
                       data, timeout):
         payload = bytes(data)
-        self.log.append(("ctrl_transfer", bmRequestType, bRequest, wValue,
-                         wIndex, payload))
-        self._fail_if_halted(0x00)
+        with self._cond:
+            self.log.append(("ctrl_transfer", bmRequestType, bRequest, wValue,
+                             wIndex, payload))
+            self._fail_if_halted(0x00)
         return len(payload)
 
+    def _blocking_read(self, source, ep, buff, kind, timeout):
+        """Shared body of intr_read / bulk_read.
+
+        Waits (releasing the condition lock) until the endpoint has data, halts,
+        or the timeout elapses, so a reader thread blocks like a real transfer
+        instead of spinning and wakes the moment data is injected.
+        """
+        with self._cond:
+            self.log.append((kind, ep, len(buff)))
+            deadline = time.monotonic() + (timeout or 0) / 1000.0
+            while True:
+                self._fail_if_halted(ep)
+                if source:
+                    return self._fill(buff, source.pop(0))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise self._timeout()
+                self._cond.wait(remaining)
+
     def intr_read(self, handle, ep, intf, buff, timeout):
-        self.log.append(("intr_read", ep, len(buff)))
-        self._fail_if_halted(ep)
-        if not self.events:
-            raise self._timeout()
-        return self._fill(buff, self.events.pop(0))
+        return self._blocking_read(self.events, ep, buff, "intr_read", timeout)
 
     def intr_write(self, handle, ep, intf, data, timeout):
-        self.log.append(("intr_write", ep, bytes(data)))
+        with self._cond:
+            self.log.append(("intr_write", ep, bytes(data)))
         return len(data)
 
     def bulk_read(self, handle, ep, intf, buff, timeout):
-        self.log.append(("bulk_read", ep, len(buff)))
-        self._fail_if_halted(ep)
-        if not self.acl:
-            raise self._timeout()
-        return self._fill(buff, self.acl.pop(0))
+        return self._blocking_read(self.acl, ep, buff, "bulk_read", timeout)
 
     def bulk_write(self, handle, ep, intf, data, timeout):
-        self.log.append(("bulk_write", ep, bytes(data)))
-        self._fail_if_halted(ep)
+        with self._cond:
+            self.log.append(("bulk_write", ep, bytes(data)))
+            self._fail_if_halted(ep)
         return len(data)

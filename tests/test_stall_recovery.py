@@ -32,6 +32,10 @@ SOME_ACL = b"\x01\x00\x02\x00\xaa\xbb"
 HCI_RESET = b"\x01\x03\x0c\x00"
 AN_ACL_WRITE = b"\x02\x01\x00\x02\x00\xaa\xbb"
 
+# Upper bound for a read expected to raise a stall from a reader thread: it is
+# re-raised as soon as the thread hits it, well before this elapses.
+WAIT_MS = 2000
+
 
 @pytest.fixture
 def opened(fake_controller):
@@ -79,11 +83,15 @@ def test_a_halted_acl_endpoint_is_reported_and_cleared(opened):
 
 
 def test_read_surfaces_a_stall_rather_than_reporting_no_data(opened):
-    """read() returning None means "nothing arrived", which a stall is not."""
+    """read() returning None means "nothing arrived", which a stall is not.
+
+    read() drains the endpoints from reader threads, so the stall is hit off the
+    caller's thread and re-raised here; halt() wakes the waiting reader at once.
+    """
     controller, backend = opened
-    backend.halted.add(ACL_IN_EP)
+    backend.halt(ACL_IN_EP)
     with pytest.raises(EndpointStalledException):
-        controller.read(timeout=10)
+        controller.read(timeout=WAIT_MS)
 
 
 def test_a_stall_is_never_swallowed_as_a_retry(opened):
