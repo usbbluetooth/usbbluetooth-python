@@ -13,6 +13,7 @@ from .exception.endpoint_stalled_exception import EndpointStalledException
 from .exception.insufficient_permissions_exception import InsufficientPermissionsException
 from .exception.unsupported_usb_device_exception import UnsupportedUsbDeviceException
 from .exception.wrong_driver_exception import WrongDriverException
+from .exception.write_timeout_exception import WriteTimeoutException
 
 __all__ = [
     "Controller",
@@ -24,4 +25,5 @@ __all__ = [
     "InsufficientPermissionsException",
     "UnsupportedUsbDeviceException",
     "WrongDriverException",
+    "WriteTimeoutException",
 ]

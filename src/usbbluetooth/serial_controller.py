@@ -12,6 +12,7 @@ from serial.tools import list_ports
 from .controller import Controller
 from .hci_hdr_type import HciHdrType
 from .exception.device_closed_exception import DeviceClosedException
+from .exception.write_timeout_exception import WriteTimeoutException
 
 # For each read packet type, the number of header bytes that follow the 1-byte
 # packet-type indicator, and how to read the payload length out of that header.
@@ -32,11 +33,12 @@ class SerialController(Controller):
     A Bluetooth HCI controller reachable over a UART, using the H4 transport.
     """
 
-    def __init__(self, port, baudrate=921600, rtscts=True, timeout=0.5):
+    def __init__(self, port, baudrate=921600, rtscts=True, timeout=0.5, write_timeout=1.0):
         self._port = port
         self._baudrate = baudrate
         self._rtscts = rtscts
         self._timeout = timeout
+        self._write_timeout = write_timeout
         self._serial = None
         self.is_open = False
 
@@ -46,6 +48,9 @@ class SerialController(Controller):
         s.baudrate = self._baudrate
         s.rtscts = self._rtscts
         s.timeout = self._timeout
+        # Without this a write to a port whose peer never drains it blocks for
+        # ever, with no way out but killing the process.
+        s.write_timeout = self._write_timeout
         s.open()
         s.reset_input_buffer()
         self._serial = s
@@ -60,10 +65,15 @@ class SerialController(Controller):
         """Write one HCI packet, including its H4 packet-type byte (``data[0]``).
 
         :return: the number of bytes written (the type byte included).
+        :raises WriteTimeoutException: if the port did not accept the packet
+            within ``write_timeout`` seconds.
         """
         if not self.is_open:
             raise DeviceClosedException()
-        return self._serial.write(bytes(data))
+        try:
+            return self._serial.write(bytes(data))
+        except serial.SerialTimeoutException:
+            raise WriteTimeoutException(self._port, self._write_timeout, self._rtscts) from None
 
     def _read_exact(self, n: int, deadline: float):
         """Read exactly ``n`` bytes before ``deadline`` (monotonic seconds), or
